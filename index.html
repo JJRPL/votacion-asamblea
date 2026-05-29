@@ -1,14 +1,162 @@
 <!DOCTYPE html>
 <html lang="es">
 <head>
-  <meta charset="UTF-8" />
+  <meta charset="UTF-8"/>
   <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
-  <title>Votación - Multifamiliares La Posada</title>
+  <title>Votación – Multifamiliares La Posada</title>
   <link rel="stylesheet" href="style.css"/>
 </head>
 <body>
   <div id="app"></div>
-  <script src="data.js"></script>
-  <script src="app.js"></script>
+
+  <script type="module">
+    import { initializeApp }
+      from "https://www.gstatic.com/firebasejs/10.12.0/firebase-app.js";
+    import {
+      getFirestore,
+      doc, getDoc, getDocs,
+      setDoc, updateDoc, deleteDoc,
+      collection, addDoc
+    } from "https://www.gstatic.com/firebasejs/10.12.0/firebase-firestore.js";
+
+    /* ── Tu configuración Firebase ── */
+    const firebaseConfig = {
+      apiKey:            "AIzaSyDHsuDqUgNoTkA0IM0x5Yq368zpFQ0WTSM",
+      authDomain:        "votacion-asamblea-76202.firebaseapp.com",
+      projectId:         "votacion-asamblea-76202",
+      storageBucket:     "votacion-asamblea-76202.firebasestorage.app",
+      messagingSenderId: "378482396407",
+      appId:             "1:378482396407:web:babd2f828483127332d7f2",
+      measurementId:     "G-FBXHK2W4PN"
+    };
+
+    const fbApp = initializeApp(firebaseConfig);
+    const db    = getFirestore(fbApp);
+
+    /* ══════════════════════════════════════════
+       API global expuesta a app.js
+       ══════════════════════════════════════════ */
+    window._fb = {
+
+      /* ── Votos ── */
+      async getVotes() {
+        const snap = await getDocs(collection(db, "votes"));
+        return snap.docs.map(d => ({ id: d.id, ...d.data() }));
+      },
+
+      async saveVote(aptCode, qId, option, coeff) {
+        const id = `${aptCode}__${qId}`;
+        await setDoc(doc(db, "votes", id), {
+          aptCode, qId, option, coeff,
+          votedAt: new Date().toISOString()
+        });
+      },
+
+      async getVotedQuestions(aptCode) {
+        const snap = await getDocs(collection(db, "votes"));
+        const ids  = [];
+        snap.docs.forEach(d => {
+          if (d.data().aptCode === aptCode) ids.push(d.data().qId);
+        });
+        return ids;
+      },
+
+      async deleteVote(voteId) {
+        await deleteDoc(doc(db, "votes", voteId));
+      },
+
+      /* ── Registro de participación ── */
+      async markUsed(aptCode) {
+        await setDoc(doc(db, "used", aptCode), {
+          aptCode,
+          usedAt: new Date().toISOString()
+        }, { merge: true });
+      },
+
+      async getUsed() {
+        const snap = await getDocs(collection(db, "used"));
+        const map  = {};
+        snap.docs.forEach(d => { map[d.id] = d.data(); });
+        return map;
+      },
+
+      async deleteUsed(aptCode) {
+        await deleteDoc(doc(db, "used", aptCode));
+      },
+
+      /* ── Preguntas ── */
+      async getQuestions() {
+        const snap = await getDocs(collection(db, "questions"));
+        const arr  = snap.docs.map(d => ({ id: d.id, ...d.data() }));
+        arr.sort((a, b) => (a.order ?? 0) - (b.order ?? 0));
+        return arr;
+      },
+
+      async addQuestion(text, options) {
+        const all   = await this.getQuestions();
+        const order = all.length;
+        await addDoc(collection(db, "questions"), {
+          text, options,
+          closed: false,
+          order,
+          createdAt: new Date().toISOString()
+        });
+      },
+
+      async updateQuestion(id, text, options) {
+        await updateDoc(doc(db, "questions", id), { text, options });
+      },
+
+      async toggleQuestion(id, closed) {
+        await updateDoc(doc(db, "questions", id), { closed });
+      },
+
+      async deleteQuestion(id) {
+        await deleteDoc(doc(db, "questions", id));
+        // Borrar también todos los votos de esa pregunta
+        const snap = await getDocs(collection(db, "votes"));
+        const deletes = [];
+        snap.docs.forEach(d => {
+          if (d.data().qId === id)
+            deletes.push(deleteDoc(doc(db, "votes", d.id)));
+        });
+        await Promise.all(deletes);
+      },
+
+      /* ── Reset completo de un apartamento ── */
+      async resetApartment(aptCode) {
+        // 1. Borrar sus votos
+        const snap = await getDocs(collection(db, "votes"));
+        const deletes = [];
+        snap.docs.forEach(d => {
+          if (d.data().aptCode === aptCode)
+            deletes.push(deleteDoc(doc(db, "votes", d.id)));
+        });
+        await Promise.all(deletes);
+        // 2. Borrar su registro de participación
+        await deleteDoc(doc(db, "used", aptCode));
+      }
+    };
+
+    /* ── Cargar scripts en orden ── */
+    function loadScript(src) {
+      return new Promise((resolve, reject) => {
+        const s   = document.createElement("script");
+        s.src     = src;
+        s.onload  = resolve;
+        s.onerror = reject;
+        document.body.appendChild(s);
+      });
+    }
+
+    loadScript("data.js")
+      .then(() => loadScript("app.js"))
+      .catch(err => {
+        document.getElementById("app").innerHTML =
+          `<div style="padding:40px;text-align:center;color:red">
+             ❌ Error al cargar la aplicación.<br/><small>${err}</small>
+           </div>`;
+      });
+  </script>
 </body>
 </html>
